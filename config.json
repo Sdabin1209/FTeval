@@ -1,0 +1,14 @@
+{
+  "paths": {
+    "data_dir": "dataset/labeled_questionnaire_100_handoff/data",
+    "runs_dir": "runs",
+    "results_dir": "results"
+  },
+  "seeds": [42, 52, 62, 72, 82],
+  "ci": {"alpha": 0.05, "B": 10000, "rng_seed": 0, "min_units": 30},
+  "thresholds": {"axis1_min_abs": 0.90, "axis2_min_f1oos_abs": 0.80},
+  "lm_corpus": "results/corpus.txt",
+  "corpus_min_sentences": 18692,
+  "lsi_dim": 10,
+  "rule_name": "토이v100"
+}
