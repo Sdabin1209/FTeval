@@ -45,7 +45,10 @@ def read_corpus(path):
 
 
 class SentenceScorer:
-    """코퍼스로 언어모델(FM용)과 LSI(AM용)를 만들어 두고 후보 문장을 채점한다."""
+    """코퍼스로 언어모델(FM용)과 LSI(AM용)를 만들어 두고 후보 문장을 채점한다. (ngram 백엔드)"""
+    kind = "ngram"
+    info = {"type": "ngram"}
+
     def __init__(self, corpus_sentences, lsi_dim=10):
         """코퍼스 문장으로 bigram 언어모델과 LSI 공간을 만든다."""
         self.corpus_size = len(corpus_sentences)
@@ -91,13 +94,17 @@ def _mean(values):
 
 
 def summarize(rows, data, scorer, min_sentences):
-    """B 실행 하나의 요약(m2p_summary.json). FM·AM 평균과 분포, 미등록 비율 평균, 결측 수, 코퍼스 규모와 '미달' 여부,
-    ref_coverage.
+    """B 실행 하나의 요약(m2p_summary.json). FM·AM 평균과 분포, 결측 수, 사용한 문장 점수 방식(scorer)을 담는다.
+
+    ngram 방식이면 미등록 비율 평균, 코퍼스 규모와 '미달' 여부, ref_coverage도 담는다. neural 방식은 코퍼스를 쓰지
+    않으므로 이 값들이 None이고 corpus_below_minimum은 False이다.
     """
     refs = data.references()
     n = len(rows)
+    ngram = scorer.kind == "ngram"
     return {
         "n_cases": n,
+        "scorer": scorer.info,
         "fm_mean": _mean([r["FM"] for r in rows]),
         "am_mean": _mean([r["AM"] for r in rows]),
         "fm_distribution": distribution([r["FM"] for r in rows]),
@@ -109,10 +116,10 @@ def summarize(rows, data, scorer, min_sentences):
         "completion_claim_rate": (sum(1 for r in rows if r["completion_claim"])
                                   / sum(1 for r in rows if not r["missing"])
                                   if any(not r["missing"] for r in rows) else None),
-        "corpus_sentences": scorer.corpus_size,
-        "corpus_below_minimum": scorer.corpus_size < min_sentences,
-        "corpus_minimum": min_sentences,
-        "ref_coverage": ref_coverage(scorer.lm, refs),
+        "corpus_sentences": scorer.corpus_size if ngram else None,
+        "corpus_below_minimum": scorer.corpus_size < min_sentences if ngram else False,
+        "corpus_minimum": min_sentences if ngram else None,
+        "ref_coverage": ref_coverage(scorer.lm, refs) if ngram else None,
         "reference_count_per_case": 1,
         "distinct_references": len(set(refs)),
     }

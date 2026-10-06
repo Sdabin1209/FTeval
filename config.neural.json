@@ -1,0 +1,42 @@
+{
+  "paths": {
+    "data_dir": "dataset/labeled_questionnaire_100_handoff/data",
+    "runs_dir": "runs",
+    "results_dir": "results_neural"
+  },
+  "seeds": [
+    42,
+    52,
+    62,
+    72,
+    82
+  ],
+  "ci": {
+    "alpha": 0.05,
+    "B": 10000,
+    "rng_seed": 0,
+    "min_units": 30
+  },
+  "thresholds": {
+    "axis1_min_abs": 0.9,
+    "axis2_min_f1oos_abs": 0.8
+  },
+  "rule_name": "토이v100",
+  "lm_corpus": "results_neural/corpus.txt",
+  "sentence_scorer": {
+    "type": "neural",
+    "device": "auto",
+    "lm": {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "revision": "8faed761d45a263340a0528343f099c05c9a4323",
+      "dtype": "float32"
+    },
+    "embedder": {
+      "model": "BAAI/bge-m3",
+      "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+      "dtype": "float32",
+      "pooling": "cls",
+      "max_length": 512
+    }
+  }
+}

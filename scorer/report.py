@@ -147,15 +147,25 @@ def build_report(config, comparison, data, store=None):
     if run_for_b:
         summary = store.read_json(run_for_b, "m2p_summary.json")
         lines.append("### B 문장 점수 기록")
-        if summary["corpus_below_minimum"]:
-            lines.append("- 코퍼스 규모 미달: %d문장 (요구 %d문장). 점수의 절대값은 믿기 어렵다." % (
-                summary["corpus_sentences"], summary["corpus_minimum"]))
+        scorer_info = summary.get("scorer") or {"type": "ngram"}
+        if scorer_info["type"] == "neural":
+            lm, emb = scorer_info["lm"], scorer_info["embedder"]
+            lines.append("- 문장 점수 방식: neural (코퍼스 없음). FM 모델 `%s`(revision %s), AM 모델 `%s`(revision %s, 풀링 %s), 장치 %s" % (
+                lm["model"], lm["revision"] or "미지정", emb["model"], emb["revision"] or "미지정",
+                emb["pooling"], scorer_info["device"]))
         else:
-            lines.append("- 코퍼스 %d문장" % summary["corpus_sentences"])
-        lines.append("- ref_coverage(정답 문장 어절 중 코퍼스에 있는 비율): %s" % fmt(summary["ref_coverage"]))
+            if summary["corpus_below_minimum"]:
+                lines.append("- 코퍼스 규모 미달: %d문장 (요구 %d문장). 점수의 절대값은 믿기 어렵다." % (
+                    summary["corpus_sentences"], summary["corpus_minimum"]))
+            else:
+                lines.append("- 코퍼스 %d문장" % summary["corpus_sentences"])
+            lines.append("- ref_coverage(정답 문장 어절 중 코퍼스에 있는 비율): %s" % fmt(summary["ref_coverage"]))
         lines.append("- 참조 1개 (사례당 정답 문장 1개, 서로 다른 문장 %d개)" % summary["distinct_references"])
-        lines.append("- 후보의 미등록 어절 비율 평균 %s, 미등록 bigram 비율 평균 %s (`%s`)" % (
-            fmt(summary["oov_word_mean"]), fmt(summary["oov_bigram_mean"]), run_for_b))
+        if scorer_info["type"] == "ngram":
+            lines.append("- 후보의 미등록 어절 비율 평균 %s, 미등록 bigram 비율 평균 %s (`%s`)" % (
+                fmt(summary["oov_word_mean"]), fmt(summary["oov_bigram_mean"]), run_for_b))
+        if comparison.get("sentence_scorer", {}).get("consistent") is False:
+            lines.append("- **경고: 실행마다 문장 점수 방식이 다릅니다. FM·AM 점수끼리 비교할 수 없습니다.**")
         for label, key in (("FM", "fm"), ("AM", "am")):
             entry = b[key]
             if "base_distribution" in entry:
@@ -227,7 +237,7 @@ def build_report(config, comparison, data, store=None):
         lines.append("- 평가 규칙: %s" % config.rule_name)
     lines.append("- 설정: B=%d, alpha=%s, rng_seed=%d, min_units=%d, 임계값 %s, 코퍼스 %s" % (
         config.ci["B"], config.ci["alpha"], config.ci["rng_seed"], config.ci["min_units"],
-        config.thresholds, config.corpus_path.name))
+        config.thresholds, config.corpus_path.name if config.sentence_scorer.get("type") == "ngram" else "(neural: 없음)"))
     lines.append("")
     return "\n".join(lines)
 

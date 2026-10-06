@@ -77,10 +77,9 @@ class Evaluator:
         self._sentence = None
 
     def _sentence_scorer(self):
-        """코퍼스로 언어모델과 LSI를 만들어 재사용한다. 파일은 만들지 않는다. (scorer, 경고)를 돌려준다."""
+        """설정에 맞는 문장 점수기(ngram이면 코퍼스로 만든 bigram과 LSI, neural이면 사전학습 모델)를 만들어 재사용한다. 파일은 만들지 않는다. (scorer, 경고)를 돌려준다."""
         if self._sentence is None:
-            corpus, warnings = pipeline.load_corpus(self.config, self.data, write=False)
-            scorer = scoring_b.SentenceScorer(corpus, lsi_dim=self.config.lsi_dim)
+            scorer, warnings = pipeline.make_sentence_scorer(self.config, self.data, write=False)
             self._sentence = (scorer, warnings)
         return self._sentence
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import scoring_a, scoring_b, stats
+from . import neural, scoring_a, scoring_b, stats
 from .dataio import Dataset, InputError, read_outputs, validate_dataset
 from .metrics import distribution, population_sd
 from .store import DiskStore, MemoryStore, read_json, read_rows as _read_rows, write_json, write_jsonl
@@ -24,7 +24,7 @@ A_SCORES, A_SUMMARY = "m1v_scores.jsonl", "m1v_summary.json"
 B_SCORES, B_SUMMARY = "m2p_scores.jsonl", "m2p_summary.json"
 RUN_META = "run_meta.json"
 
-__all__ = ["Config", "DiskStore", "MemoryStore", "check_inputs", "load_corpus", "normalize_outputs",
+__all__ = ["Config", "DiskStore", "MemoryStore", "check_inputs", "load_corpus", "make_sentence_scorer", "normalize_outputs",
            "score_outputs", "score_run_folder", "compare_runs", "read_json", "write_json", "write_jsonl"]
 
 
@@ -47,12 +47,29 @@ class Config:
         self.seeds = self.raw["seeds"]
         self.corpus_min_sentences = self.raw.get("corpus_min_sentences", 18692)
         self.lsi_dim = self.raw.get("lsi_dim", 10)
+        # 문장 점수 방식: {"type": "ngram"}(기본, 코퍼스로 bigram+LSI) 또는 {"type": "neural", "lm": {...}, "embedder": {...}}
+        self.sentence_scorer = self.raw.get("sentence_scorer", {"type": "ngram"})
         self.rule_name = self.raw.get("rule_name")        # 리포트 끝에 가볍게 남길 평가 규칙 이름(없어도 된다)
 
     def _resolve(self, value):
         """상대 경로를 설정 파일이 있는 폴더 기준 경로로 바꾼다."""
         p = Path(value)
         return p if p.is_absolute() else (self.root / p)
+
+
+def make_sentence_scorer(config, data, write=True):
+    """설정(sentence_scorer)에 맞는 문장 점수기를 만든다. (scorer, 경고 목록)을 돌려준다.
+
+    ngram이면 코퍼스를 읽거나 만들어 BigramLM과 LSI를 만든다(write가 False면 파일을 쓰지 않는다).
+    neural이면 코퍼스 없이 사전학습 모델을 불러온다.
+    """
+    kind = config.sentence_scorer.get("type") if isinstance(config.sentence_scorer, dict) else None
+    if kind == "ngram":
+        corpus, warnings = load_corpus(config, data, write=write)
+        return scoring_b.SentenceScorer(corpus, lsi_dim=config.lsi_dim), warnings
+    if kind == "neural":
+        return neural.build_scorer(config.sentence_scorer), []
+    raise InputError("config sentence_scorer.type must be 'ngram' or 'neural'")
 
 
 def check_inputs(config):
@@ -121,7 +138,7 @@ def score_outputs(config, data, run_id, a_values, b_values, *, model_id=None, de
     if decoding is not None and not isinstance(decoding, dict):
         raise InputError("decoding settings must be a JSON object")
     if b_values is not None and sentence_scorer is None:
-        raise InputError("scoring role B needs a sentence scorer built from the corpus")
+        raise InputError("scoring role B needs a sentence scorer")
     warnings = list(input_warnings)
     if decoding is None:
         warnings.append("decoding settings were not provided")
@@ -164,6 +181,7 @@ def score_outputs(config, data, run_id, a_values, b_values, *, model_id=None, de
         "prompt_hash": data.prompt_hash(),
         "hash_scope": scope,
         "scorer_version": SCORER_VERSION,
+        "sentence_scorer": sentence_scorer.info if sentence_scorer is not None else None,
         "finetune": None,
         "warnings": warnings,
     }
@@ -191,9 +209,8 @@ def score_run_folder(config, data, run_id, model_id=None, decoding=None):
     if b_path.exists():
         b_values, w = read_outputs(b_path, "candidate", ids)
         input_warnings += w
-        corpus, w = load_corpus(config, data, write=True)
+        scorer, w = make_sentence_scorer(config, data, write=True)
         input_warnings += w
-        scorer = scoring_b.SentenceScorer(corpus, lsi_dim=config.lsi_dim)
     artifacts, warnings = score_outputs(config, data, run_id, a_values, b_values, model_id=model_id,
                                         decoding=decoding, sentence_scorer=scorer, input_warnings=input_warnings)
     produced = DiskStore(config.results_dir).write(run_id, artifacts)
@@ -231,7 +248,20 @@ def compare_runs(config, store=None):
     a, b = _compare_a(config, store), _compare_b(config, store)
     runs = ([BASE] if a["base"] is not None or "base_mean" in b.get("fm", {}) else []) + sorted(
         set(a["ft_runs"]) | set(b["ft_runs"]))
-    return {"a": a, "b": b, "decoding": _decoding_check(runs, store)}
+    return {"a": a, "b": b, "decoding": _decoding_check(runs, store), "sentence_scorer": _scorer_check(runs, store)}
+
+
+def _scorer_check(runs, store):
+    """실행들이 같은 문장 점수 방식(ngram 또는 같은 neural 모델)으로 채점됐는지 확인한다.
+
+    per_run: 실행별 방식(B를 채점하지 않았거나 기록이 없으면 None), consistent: 기록이 있는 실행이 둘 이상일 때
+    모두 같으면 True, 다르면 False, 비교할 수 없으면 None. 방식이 다른 점수끼리는 비교할 수 없다.
+    """
+    per_run = {}
+    for run in runs:
+        per_run[run] = store.read_json(run, RUN_META).get("sentence_scorer") if store.has(run, RUN_META) else None
+    given = [json.dumps(v, sort_keys=True, ensure_ascii=False) for v in per_run.values() if v is not None]
+    return {"per_run": per_run, "consistent": (len(set(given)) == 1) if len(given) >= 2 else None}
 
 
 def _decoding_check(runs, store):
